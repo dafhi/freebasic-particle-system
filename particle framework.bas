@@ -1,10 +1,10 @@
-/' -- particle framework - 2025 Jan 23 - by dafhi
+/' -- particle framework - 2025 Jan 24 - by dafhi
 
-    License:  Use, modify, profit.
+    License:  use, modify, profit
 
         Inspired by
         
-    1. desire for simplification (my particle interest dates to 2004-ish)
+    1. desire for simplification (my particles interest goes to ~2004)
     2. ongoing search for my holy grail of fixed-rate emitters:  fps-congruent acceleration
     
         features
@@ -16,7 +16,8 @@
     per-particle FPS
     set emission (& duration) at any time
     set acceleration (& duration) at any time
-    auto recycle
+    randomized initial pos
+    simple & efficient recycling
     
         Things that will likely change
     
@@ -25,14 +26,16 @@
   
   
         - update -
-        
-    moved a bunch of stuff to precede the namespace
-    renamed a bunch of stuff
-    moved emitter.spawn_vel & .spawn_dv to shared variables
-    set_accel precalc
-    add_particle e.vel precalc
-    add_particle rand_pos0 parameter
+
+    12 FPS spawn.  Was 25.  11 looks lame.
     
+    moved draw sub outside of namespace
+    renamed -> draw_particles
+    
+        fixed high game deltatime spawn pos:
+    renamed _phys -> _phys_and_spawn
+    moved _spawn from _fixedrate_phys to _phys_and_spawn
+
 '/
 
 '#include "v3_base.bas"
@@ -169,17 +172,6 @@ end sub
             e._t_emit = 0
         EndIf
     End Sub
-    
-    sub _phys( e as emitter, dt as single )
-        e.life -= dt
-        while dt > 0
-            phys_frame e
-            accel_timer e, min( dt, e._one_over_fps )
-            emission_timer e, min( dt, e._one_over_fps )
-            e._lt_phys -= e._one_over_fps
-            dt -= e._one_over_fps
-        wend
-    End Sub
       
     sub _spawn( e as emitter, dt as single, p0 as p3, dpos as v3 )
         static as v3 v
@@ -189,10 +181,10 @@ end sub
         dim as single f = rnd
         if f < (dt) then
             
-            v.rand_on_sphere( spawn_vel + rnd * spawn_dv ) '' float scalars
+            v.rand_on_sphere( spawn_vel + rnd * spawn_dv ) ' floats
             
             dim as single density = .3 + .05 * rnd
-            dim as single phys_fps = 25
+            dim as single phys_fps = 12
             dim as single life = 1.5 + rnd * .5
             e.k_transfer v, density, phys_fps, life
         EndIf
@@ -200,59 +192,68 @@ end sub
         Wend
     end sub
     
+    sub _phys_and_spawn( e as emitter, dt as single )
+        e.life -= dt
+        while dt > 0
+            dim as p3     spawn_pos0 = e.pos
+            phys_frame e
+            
+            _spawn e, e._one_over_fps, spawn_pos0, e.pos - spawn_pos0 '' 2025 Jan 24
+            
+            accel_timer e, min( dt, e._one_over_fps )
+            emission_timer e, min( dt, e._one_over_fps )
+            e._lt_phys -= e._one_over_fps
+            dt -= e._one_over_fps
+        wend
+    End Sub
+    
         function f_dpos( e as emitter, dt as single ) as v3
             return e.vel * dt * e._k
         End Function
     
     sub _fixedrate_phys( e as emitter, dt as single )
         dim as single t_zero = e.life - dt
-        
-        if t_zero > e._lt_phys then '' no position update, but maybe spawn
-        
+        if t_zero > e._lt_phys then       '' no position update, but maybe spawn
             e.life = t_zero
             _spawn e, dt, e.pos, f_dpos(e, dt)
             accel_timer e, dt
             emission_timer e, dt
         else
-            dim as p3     spawn_pos0 = e.pos
-            _phys e, dt
-            _spawn e, dt, spawn_pos0, e.pos - spawn_pos0
+            _phys_and_spawn e, dt
         endif
     end sub
     
-    sub _recycle
-        dim as long i
-            while i <= i_active
-        dim byref as emitter e = a_emi(i)
+    sub _recycle( e as emitter, byref i as long )
         if e._one_over_fps andalso e.life <= 0 then
             e = a_emi(i_active)
             i_active -= 1
         else
             i += 1
         endif
-        wend
     end sub
 
 sub update( dt as single )
-    for i as long = 0 to i_active
-        _fixedrate_phys a_emi(i), dt
-    next
-    _recycle
+    dim as long i
+        while i <= i_active
+    _fixedrate_phys a_emi(i), dt
+    _recycle a_emi(i), i
+    wend
 end sub
 
-sub draw
+end namespace
+
+' ----------------------
+
+sub draw_particles
     for i as long = 0 to i_active
       pset ( a_emi(i).pos.x, a_emi(i).pos.y )
     next
 end sub
 
-end namespace
-
   function round(in as double, places as ubyte = 2) as string '' mostly for debug / print
     dim as integer mul = 10 ^ places
     return str(csng( int(in * mul + .5) / mul) )
   End Function
-
 
 
 dim as long  w = 800
@@ -270,62 +271,67 @@ dim as long   rocket_x_array(u)
 
 dim as single size = sqr(w*w + h*h) / 10
 dim as single life = 8
-dim as single dens = 0.4
+dim as single dens = 0.3
 
 dim as v3     v = type(0,1,0) * -h / 15
 
 
     '' rockets
 for i as long = 0 to u
-    
-    dim as single fps = (i+.1) * 10 '' fps profiles
+
+    dim as single fps = (i+.5) * 10 '' fps profiles
     
     str_fps_array(i) = round(fps)  '' printout
     rocket_x_array(i) = 50 + 150*i
     
-    '' A main sub
+    '' a main sub
     new_particle type( rocket_x_array(i), y_ - 2), v*0, dens, fps, life
     
     dim byref as emitter e = a_emi(i)
     
     '' secondary sub
-    set_accel e, v*8, 1.4               '' duration
+    set_accel e, v*33, .4               '' duration
         
         var particles_per_second = 999
+        
     '' secondary sub
     set_emission e, particles_per_second, 5 '' duration
     
-    spawn_vel = (.2) * size
+    spawn_vel = (.3) * size
     spawn_dv = (.1) * size
 next
 
     dim as double t = timer, t0 = t, t1 = t + 10
-
+    dim as double t_info_update = t + .5
 
 while t < t1
 
-        screenlock
+    screenlock
+    
     cls
+    draw_particles
+    
     line (1,y_)-(w-2,y_)
     draw string (5, y_ + 10), " FPS"
-
     for i as long = 0 to u
-        dim byref as emitter e = a_emi(i)
         draw string ( rocket_x_array(i), y_ + 10 ), str_fps_array(i)
     next
-
-
-    ns_particles.draw         '' a main sub
+    
     screenunlock
 
     dim as double t = timer
     ns_particles.update t - t0 '' a main sub
     t0 = t
 
-
+    if t > t_info_update then
+'        windowtitle "particle count " + str(i_active + 1)
+        t_info_update += 2
+    endif
+    
     var kstr = inkey
     if kstr <> "" or i_active < 0 then exit while
-    sleep 1
+    sleep 15
+
 wend
 
 
