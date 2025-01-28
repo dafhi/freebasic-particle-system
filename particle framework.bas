@@ -1,18 +1,16 @@
-/' -- freebasic particle FX framework - 2025 Jan 27 - by dafhi
+/' -- freebasic particle FX framework - 2025 Jan 27.u1 - by dafhi
 
     License:  use, modify, profit
     
       - features
 
     set acceleration or emission at any time
-    velocity transfer
-    3d vectors
+    vector math
 
-    - updates (more of an overhaul)
+    - updates
     
-    tossed the namespace
-    visuals a closer match to requested fps
-    emission calc in new sub _emit_multiple()
+    axed a few LOC
+    shared variables for low fps artistic analysis
 
     - will likely change
 
@@ -88,25 +86,23 @@ end type
 
         dim shared as single   spawn_vel = 50 '' demo variables
         dim shared as single   spawn_dv = 25
-    
-    
-    function f_velnorm( vel as v3, k as single, fps as single ) as  v3 '' 2025 Jan 23
-        return vel * (fps * k)
-    end function
 
-    function f_rand_pos0 as const single
-        return 1 - rnd^2
-    end function
+        dim shared as single _age, one_over_gsum
+        dim shared as v3     gv_parent
 
-    sub k_transfer( e as emitter, v_explo as v3, v_parent as v3, k as single, fps as single )', rand_pos0 as single )
-        e.vel = f_velnorm( v_parent, k, fps ) + v_explo
+
+    sub k_transfer( e as emitter, v_explo as v3, v_parent as v3, k as single, fps as single )
+            one_over_gsum = 1 / geometric_sum( e._k, fps )
+            gv_parent = v_parent * one_over_gsum
         
-        e.vel /= geometric_sum( e._k, fps )       ' accurate - 2025 Jan 23
-        'e.vel *= e._one_over_fps                 ' approximate
+        e.vel = gv_parent + v_explo
+        
+        e.vel *= one_over_gsum       ' accurate - 2025 Jan 23
+        'e.vel *= e._one_over_fps     ' approximate
     end sub
 
 
-sub new_particle( p0 as v3, v_explo as v3, particle_density as single, physics_fps as single, life as single = 1, _v_parent as v3 = type(0,0,0), rand_pos0 as single = 0 )
+sub new_particle( p0 as v3, v_explo as v3, particle_density as single, physics_fps as single, life as single = 1, _v_parent as v3 = type(0,0,0) )
     
     if i_active >= ubound(a_emi) then exit sub
     
@@ -116,10 +112,12 @@ sub new_particle( p0 as v3, v_explo as v3, particle_density as single, physics_f
     e._one_over_fps = 1 / physics_fps
     e._k = particle_density ^ e._one_over_fps
     
-    k_transfer e, v_explo, _v_parent, particle_density, physics_fps', f_rand_pos0
+    k_transfer e, v_explo, _v_parent, particle_density, physics_fps
     e.pos = p0
-    e.life = life
+    _age = rnd
+    e.life = life - _age
     e._lt_phys = e.life - e._one_over_fps       ' physics frame trigger
+    
 end sub
     
     sub set_accel( e as emitter, a as v3, t as single )
@@ -128,16 +126,6 @@ end sub
         e.accel = a * e._one_over_fps ^ 2 / k
         e._t_accel = t
     end sub
-        
-        function f_recycle( e as emitter ) as boolean
-            if e.life <= 0 then
-                e = a_emi(i_active) '' replace with highest element
-                i_active -= 1       '' reduce stack pointer
-                return true
-            else
-                return false
-            endif
-        end function
           
         sub _emit_multiple( e as emitter, dt as single, p0 as p3, byval vel_parent as v3 )
             dim as single phys_fps = 1 / e._one_over_fps
@@ -149,15 +137,25 @@ end sub
                 dim as single density = .3 + .05 * rnd
                 dim as single life = 1.5 + rnd
                 
-                new_particle p0, v_explo, density, phys_fps, life, vel_parent, f_rand_pos0
-                a_emi(i_active).pos += a_emi(i_active).vel * f_rand_pos0 * a_emi(i_active)._k
+                new_particle p0, v_explo, density, phys_fps, life, vel_parent
+                a_emi(i_active).pos += (gv_parent + v_explo) * (_age * a_emi(i_active)._k)
                 
             next
         end sub
+        
+        function f_recycle( e as emitter ) as boolean
+            if e.life <= 0 then
+                e = a_emi(i_active) '' replace with highest element
+                i_active -= 1       '' reduce stack pointer
+                return true
+            else
+                return false
+            endif
+        end function
     
     sub set_emission( e as emitter, pps as single, t as single )
         
-        e._pps = -abs(pps) '' _frame0_spawns() initial condition
+        e._pps = -abs(pps) '' initial condition for _frame0_spawns()
         e._t_emit = t
     end sub
 
@@ -308,7 +306,6 @@ while t < t1
     tp = t
 
     if t > t_info_update then
-'        windowtitle "particle count " + str(i_active + 1)
         t_info_update += 2
     endif
     
@@ -323,4 +320,3 @@ locate 3,2
 print "Done!"
 
 sleep 2000
-
