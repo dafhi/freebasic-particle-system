@@ -1,4 +1,4 @@
-/' -- freebasic particle FX framework - 2025 Jan 27.u1 - by dafhi
+/' -- freebasic particle FX framework - 2025 Jan 27.u2 - by dafhi
 
     License:  use, modify, profit
     
@@ -7,10 +7,9 @@
     set acceleration or emission at any time
     vector math
 
-    - updates
+    - update
     
-    axed a few LOC
-    shared variables for low fps artistic analysis
+    _age formula
 
     - will likely change
 
@@ -68,12 +67,12 @@ type emitter
     as v3       vel
     as single   life
     
-    as v3       accel         '' extra spicy physics
+    as v3       accel         '' spice
     
-    as single   _k            '' fixed-rate physics
+    as single   _k            '' fixed-rate density precalc
     as single   _one_over_fps
     
-    as single   _lt_phys      '' if life <= this, calc physics frame
+    as single   _t_phys       '' if life <= this, do physics
     
     as single   _pps          '' particles per sec
     as single   _t_accel      '' this <= 0, stop acceleration
@@ -114,9 +113,9 @@ sub new_particle( p0 as v3, v_explo as v3, particle_density as single, physics_f
     
     k_transfer e, v_explo, _v_parent, particle_density, physics_fps
     e.pos = p0
-    _age = rnd
+    _age = e._k ^ rnd
     e.life = life - _age
-    e._lt_phys = e.life - e._one_over_fps       ' physics frame trigger
+    e._t_phys = e.life - e._one_over_fps       ' physics frame trigger
     
 end sub
     
@@ -189,7 +188,7 @@ end sub
             accel_timer e, e._one_over_fps
             emission_timer e, e._one_over_fps
             
-            e._lt_phys -= e._one_over_fps
+            e._t_phys -= e._one_over_fps
             dt        -= e._one_over_fps
         wend
         return false
@@ -203,7 +202,7 @@ end sub
         end sub
         
         function frame_tick( e as emitter, t_zero as single ) as boolean
-            return e._lt_phys >= t_zero
+            return e._t_phys >= t_zero
         end function
     
     sub _rate_and_indexing_manager( e as emitter, dt as single, byref i as long )
