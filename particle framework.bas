@@ -1,4 +1,4 @@
-/' -- freebasic particle FX framework - 2025 Jan 27.u2 - by dafhi
+/' -- freebasic particle FX framework - 2025 Jan 29 - by dafhi
 
     License:  use, modify, profit
     
@@ -9,13 +9,13 @@
 
     - update
     
-    _age formula
+    more realistic low fps pattern
 
     - will likely change
 
     _emit_multiple() subroutine, created in a demo-ish way
     set_accel algorithm (far-off future unless my IQ suddenly jumps)
-
+    
 '/
 
     const tau = 8 * Atn(1)
@@ -51,13 +51,18 @@ operator *( L as Single, byref R as v3 ) as v3 : return type( L*r.x, L*r.y, L*r.
         return iif( (a)<(b), (a), (b) )
     end function
 
-        function round(in as double, places as ubyte = 2) as string '' mostly for debug / print
-          dim as integer mul = 10 ^ places
-          return str(csng( int(in * mul + .5) / mul) )
-        End Function
-
-    function geometric_sum( k as single = .5, n as single = 2) as double
+    function geometric_sum( k as single, n as single) as double
         return (k-k^(n+1)) / (1-k)
+    end function
+    
+    function sum_of_geom_sum( k as single, t as single) as single
+      
+      '   -- theory -
+      ' geometric sum    [sum of geometric sum combo]
+      ' k*(1-k^1)/(1-k)   + .. k*(1-k^n)/(1-k)
+      
+        static as single r:  r = k/( 1 * (1 - k)) '' k usually fractional
+        return r * ( t - r*(1 - k ^ t))
     end function
 
 
@@ -80,65 +85,52 @@ type emitter
 
 end type
 
-    dim shared as emitter  a_emi(299999)
-    dim shared as long     i_active = -1
+    dim shared as emitter a_emi(299999)
+    dim shared as long    i_active = -1
 
-        dim shared as single   spawn_vel = 50 '' demo variables
-        dim shared as single   spawn_dv = 25
+    dim shared as single  spawn_vel = 50 '' demo variables
+    dim shared as single  spawn_dv = 25
+    
+  
+    function f_vlerp( v0 as v3, v1 as v3, f as single ) as v3
+        return v0 * (1-f) + v1 * f
+    end function
+        dim shared as single  _age
 
-        dim shared as single _age, one_over_gsum
-        dim shared as v3     gv_parent
-
-
-    sub k_transfer( e as emitter, v_explo as v3, v_parent as v3, k as single, fps as single )
-            one_over_gsum = 1 / geometric_sum( e._k, fps )
-            gv_parent = v_parent * one_over_gsum
-        
-        e.vel = gv_parent + v_explo
-        
-        e.vel *= one_over_gsum       ' accurate - 2025 Jan 23
-        'e.vel *= e._one_over_fps     ' approximate
+    sub vel_transfer( e as emitter, v_explo as v3, dens as single, fps as single, v_parent_times_gsum as v3 )
+        dim as single one_over_gsum = 1 / geometric_sum( e._k, fps) '' ( k, fps ) used in _emit_multiple (which looks better there)
+        dim as v3 v0: v0 = (v_explo + v_parent_times_gsum) * one_over_gsum
+        e.vel = f_vlerp( v0, v0 * e._k, _age )
     end sub
 
 
-sub new_particle( p0 as v3, v_explo as v3, particle_density as single, physics_fps as single, life as single = 1, _v_parent as v3 = type(0,0,0) )
-    
+sub new_particle( p0 as v3, v_explo as v3, particle_density as single, physics_fps as single, life as single = 1, v_parent_times_gsum as v3 = type(0,0,0) )
     if i_active >= ubound(a_emi) then exit sub
-    
     i_active += 1
     dim byref as emitter e = a_emi(i_active)
-    
+    e.pos = p0
     e._one_over_fps = 1 / physics_fps
     e._k = particle_density ^ e._one_over_fps
-    
-    k_transfer e, v_explo, _v_parent, particle_density, physics_fps
-    e.pos = p0
-    _age = e._k ^ rnd
+    _age = rnd
     e.life = life - _age
-    e._t_phys = e.life - e._one_over_fps       ' physics frame trigger
-    
+    e._t_phys = e.life - e._one_over_fps
+    vel_transfer e, v_explo, particle_density, physics_fps, v_parent_times_gsum
 end sub
     
     sub set_accel( e as emitter, a as v3, t as single )
-        dim as single fps = 1 / e._one_over_fps
-        dim as single k = e._k ^ fps
-        e.accel = a * e._one_over_fps ^ 2 / k
+        e.accel = a / sum_of_geom_sum( e._k, 1 / e._one_over_fps ) '' not quite the fps-congruent holy grail
         e._t_accel = t
     end sub
           
-        sub _emit_multiple( e as emitter, dt as single, p0 as p3, byval vel_parent as v3 )
-            dim as single phys_fps = 1 / e._one_over_fps
-            
-            for j as long = 1 to int( dt * e._pps + rnd)
-                
+        sub _emit_multiple( e as emitter )
+            dim as single fps = 1 / e._one_over_fps
+            dim as v3     v_parent_multiple = e.vel * geometric_sum( e._k, fps )
+            for j as long = 1 to int( e._one_over_fps * e._pps + rnd)
                 static as v3 v_explo :  v_explo.rand_on_sphere( spawn_vel + rnd * spawn_dv )
-                
                 dim as single density = .3 + .05 * rnd
                 dim as single life = 1.5 + rnd
-                
-                new_particle p0, v_explo, density, phys_fps, life, vel_parent
-                a_emi(i_active).pos += (gv_parent + v_explo) * (_age * a_emi(i_active)._k)
-                
+                new_particle e.pos, v_explo, density, fps, life, v_parent_multiple
+                a_emi(i_active).pos += a_emi(i_active).vel * _age + v_explo * (1 - _age)
             next
         end sub
         
@@ -153,7 +145,6 @@ end sub
         end function
     
     sub set_emission( e as emitter, pps as single, t as single )
-        
         e._pps = -abs(pps) '' initial condition for _frame0_spawns()
         e._t_emit = t
     end sub
@@ -181,13 +172,10 @@ end sub
         while dt > 0
             e.life -= e._one_over_fps
             if f_recycle( e ) then return true
-
             phys_frame e
-            _emit_multiple e, e._one_over_fps, e.pos, e.vel
-            
+            _emit_multiple e
             accel_timer e, e._one_over_fps
             emission_timer e, e._one_over_fps
-            
             e._t_phys -= e._one_over_fps
             dt        -= e._one_over_fps
         wend
@@ -197,7 +185,7 @@ end sub
         sub _frame0_spawns( e as emitter )
             if e._pps < 0 then
                 e._pps = -e._pps
-                _emit_multiple e, e._one_over_fps, e.pos, (e.vel+e.accel) * e._k / 2
+                _emit_multiple e
             endif
         end sub
         
@@ -236,6 +224,11 @@ sub draw_particles
     next
 end sub
 
+        function round(in as double, places as ubyte = 2) as string '' mostly for debug / print
+          dim as integer mul = 10 ^ places
+          return str(csng( int(in * mul + .5) / mul) )
+        End Function
+
 
 dim as long  w = 800
 dim as long  h = 600
@@ -252,7 +245,7 @@ dim as long   rocket_x_array(u)
 
 dim as single size = sqr(w*w + h*h) / 10
 dim as single life = 8
-dim as single dens = 0.3
+dim as single dens = 0.6
 
 dim as v3     v = type(0,1,0) * -h / 15
 
@@ -266,19 +259,19 @@ for i as long = 0 to u
     rocket_x_array(i) = 50 + 150*i
     
     '' a main sub
-    new_particle type( rocket_x_array(i), y_ - 2), v*1, dens, fps, life
+    new_particle type( rocket_x_array(i), y_ - 2), v*0, dens, fps, life
     
     dim byref as emitter e = a_emi(i)
     
     '' secondary sub
-    set_accel e, v*3, 1.1               '' duration
+    set_accel e, v*2.0, 1.2               '' duration
         
         var particles_per_second = 299
         
     '' secondary sub
     set_emission e, particles_per_second, 5 '' duration
     
-    spawn_vel = (.3) * size
+    spawn_vel = (.2) * size
     spawn_dv = (.01) * size
 next
 
@@ -287,8 +280,6 @@ next
 
 while t < t1
 
-'    screenlock
-    
     cls
     draw_particles
     
@@ -297,8 +288,6 @@ while t < t1
     for i as long = 0 to u
         draw string ( rocket_x_array(i), y_ + 10 ), str_fps_array(i)
     next
-    
-'    screenunlock
 
     t = timer
     update_particles t - tp '' a main sub
@@ -310,7 +299,7 @@ while t < t1
     
     var kstr = inkey
     if kstr <> "" or i_active < 0 then exit while
-    sleep 15
+    sleep 15 '+ rnd * 200
 
 wend
 
