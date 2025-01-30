@@ -1,4 +1,4 @@
-/' -- freebasic particle FX framework - 2025 Jan 29 - by dafhi
+/' -- freebasic particle FX framework - 2025 Jan 29.u1 - by dafhi
 
     License:  use, modify, profit
     
@@ -9,7 +9,8 @@
 
     - update
     
-    more realistic low fps pattern
+    _emit_multiple() v_parent .. (previous formula over-scaled velocity)
+
 
     - will likely change
 
@@ -61,7 +62,7 @@ operator *( L as Single, byref R as v3 ) as v3 : return type( L*r.x, L*r.y, L*r.
       ' geometric sum    [sum of geometric sum combo]
       ' k*(1-k^1)/(1-k)   + .. k*(1-k^n)/(1-k)
       
-        static as single r:  r = k/( 1 * (1 - k)) '' k usually fractional
+        static as single r:  r = k/(1 - k) '' k usually fractional
         return r * ( t - r*(1 - k ^ t))
     end function
 
@@ -121,15 +122,21 @@ end sub
         e.accel = a / sum_of_geom_sum( e._k, 1 / e._one_over_fps ) '' not quite the fps-congruent holy grail
         e._t_accel = t
     end sub
+    
+        function f_velnorm( e as emitter, fps as single ) as v3
+            return (fps * e._k ^ fps) * e.vel
+        end function
           
         sub _emit_multiple( e as emitter )
-            dim as single fps = 1 / e._one_over_fps
-            dim as v3     v_parent_multiple = e.vel * geometric_sum( e._k, fps )
+            
+            dim as single fps      = 1 / e._one_over_fps
+            dim as v3     v_parent = f_velnorm( e, fps )
+            
             for j as long = 1 to int( e._one_over_fps * e._pps + rnd)
                 static as v3 v_explo :  v_explo.rand_on_sphere( spawn_vel + rnd * spawn_dv )
                 dim as single density = .3 + .05 * rnd
                 dim as single life = 1.5 + rnd
-                new_particle e.pos, v_explo, density, fps, life, v_parent_multiple
+                new_particle e.pos, v_explo, density, fps, life, v_parent
                 a_emi(i_active).pos += a_emi(i_active).vel * _age + v_explo * (1 - _age)
             next
         end sub
@@ -245,7 +252,7 @@ dim as long   rocket_x_array(u)
 
 dim as single size = sqr(w*w + h*h) / 10
 dim as single life = 8
-dim as single dens = 0.6
+dim as single dens = 0.2
 
 dim as v3     v = type(0,1,0) * -h / 15
 
@@ -264,7 +271,7 @@ for i as long = 0 to u
     dim byref as emitter e = a_emi(i)
     
     '' secondary sub
-    set_accel e, v*2.0, 1.2               '' duration
+    set_accel e, v*4.6, 1.2               '' duration
         
         var particles_per_second = 299
         
