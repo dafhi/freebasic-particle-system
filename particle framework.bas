@@ -1,4 +1,4 @@
-/' -- freebasic particle FX framework - 2025 Jan 29.u1 - by dafhi
+/' -- freebasic particle FX framework - 2025 Feb 3 - by dafhi
 
     License:  use, modify, profit
     
@@ -9,7 +9,10 @@
 
     - update
     
-    _emit_multiple() v_parent .. (previous formula over-scaled velocity)
+    1. give new particles airtime :
+       moved f_phys_emit_and_recycle() -> life -= .. [to loop end]
+    
+    2. low fps accuracy: _rate_and_indexing_manager() -> accel_timer()
 
 
     - will likely change
@@ -18,14 +21,13 @@
     set_accel algorithm (far-off future unless my IQ suddenly jumps)
     
 '/
-
     const tau = 8 * Atn(1)
 
 type p3 as v3
 
 type v3
-    declare sub       rand_on_sphere( as single = 1 )
-    declare operator  cast as string
+    declare operator  cast as string                  '' optional (debugger)
+    declare sub       rand_on_sphere( as single = 1 ) '' optional (explosion)
 
     as single         x,y,z
 End Type
@@ -56,6 +58,8 @@ operator *( L as Single, byref R as v3 ) as v3 : return type( L*r.x, L*r.y, L*r.
         return (k-k^(n+1)) / (1-k)
     end function
     
+        '' acceleration precalc
+        ''
     function sum_of_geom_sum( k as single, t as single) as single
       
       '   -- theory -
@@ -72,6 +76,8 @@ type emitter
     as p3       pos           '' basic particle properties
     as v3       vel
     as single   life
+    
+    as ulong    argb          '' new (2025 )
     
     as v3       accel         '' spice
     
@@ -119,7 +125,7 @@ sub new_particle( p0 as v3, v_explo as v3, particle_density as single, physics_f
 end sub
     
     sub set_accel( e as emitter, a as v3, t as single )
-        e.accel = a / sum_of_geom_sum( e._k, 1 / e._one_over_fps ) '' not quite the fps-congruent holy grail
+        e.accel = a / sum_of_geom_sum( e._k, 1 / e._one_over_fps ) '' the search for holy grail fps-congruency continues
         e._t_accel = t
     end sub
     
@@ -156,7 +162,7 @@ end sub
         e._t_emit = t
     end sub
 
-    sub phys_frame( e as emitter ) '' fast approxximate terminal velocity.  sometimes i reorder
+    sub phys_frame( e as emitter ) '' fast approxximate terminal velocity
         e.vel += e.accel
         e.vel *= e._k
         e.pos += e.vel
@@ -177,7 +183,6 @@ end sub
     
     function f_phys_emit_and_recycle( e as emitter, dt as single ) as boolean
         while dt > 0
-            e.life -= e._one_over_fps
             if f_recycle( e ) then return true
             phys_frame e
             _emit_multiple e
@@ -185,6 +190,7 @@ end sub
             emission_timer e, e._one_over_fps
             e._t_phys -= e._one_over_fps
             dt        -= e._one_over_fps
+            e.life    -= e._one_over_fps
         wend
         return false
     End function
@@ -201,13 +207,13 @@ end sub
         end function
     
     sub _rate_and_indexing_manager( e as emitter, dt as single, byref i as long )
-        
-        _frame0_spawns e '' 2025 Jan 27
+        _frame0_spawns e
         
         dim as single t_zero = e.life - dt
         if frame_tick( e, t_zero ) then
             if f_phys_emit_and_recycle( e, dt ) then exit sub '' recycle pops high elem emitter to 'i'
             e.life = t_zero
+            accel_timer e, dt '' 2025 Feb 3
         else
             e.life = t_zero
             if f_recycle( e ) then exit sub
@@ -223,7 +229,7 @@ sub update_particles( dt as single )
     wend
 end sub
 
-' ----------------------
+' ----------------------------------------------------------
 
 sub draw_particles
     for i as long = 0 to i_active
@@ -231,17 +237,16 @@ sub draw_particles
     next
 end sub
 
-        function round(in as double, places as ubyte = 2) as string '' mostly for debug / print
-          dim as integer mul = 10 ^ places
-          return str(csng( int(in * mul + .5) / mul) )
-        End Function
+    function round(in as double, places as ubyte = 2) as string '' mostly for debug / print
+      dim as integer mul = 10 ^ places
+      return str(csng( int(in * mul + .5) / mul) )
+    End Function
 
 
 dim as long  w = 800
 dim as long  h = 600
 
 screenres w,h, 32
-
 
 dim as long   y_ = h - 50
 
@@ -260,8 +265,8 @@ dim as v3     v = type(0,1,0) * -h / 15
     '' rockets
 for i as long = 0 to u
 
-    dim as single fps = (i+.2) * 10
-    
+    dim as single fps = (i + .2) * 10
+'    fps = 27
     str_fps_array(i) = round(fps)  '' printout
     rocket_x_array(i) = 50 + 150*i
     
@@ -271,22 +276,23 @@ for i as long = 0 to u
     dim byref as emitter e = a_emi(i)
     
     '' secondary sub
-    set_accel e, v*4.6, 1.2               '' duration
+    set_accel e, v*15.0, .25               '' duration
         
-        var particles_per_second = 299
+        var particles_per_second = 999
         
     '' secondary sub
-    set_emission e, particles_per_second, 5 '' duration
+    set_emission e, particles_per_second, 2. '' duration
     
-    spawn_vel = (.2) * size
-    spawn_dv = (.01) * size
 next
+    spawn_vel = ( .15 * (1 + 0)) * size
+    spawn_dv = (.01) * size
 
     dim as double t = timer, tp = t, t1 = t + 10
     dim as double t_info_update = t + .5
 
 while t < t1
 
+    screenlock
     cls
     draw_particles
     
@@ -295,7 +301,8 @@ while t < t1
     for i as long = 0 to u
         draw string ( rocket_x_array(i), y_ + 10 ), str_fps_array(i)
     next
-
+    screenunlock
+    
     t = timer
     update_particles t - tp '' a main sub
     tp = t
@@ -306,7 +313,7 @@ while t < t1
     
     var kstr = inkey
     if kstr <> "" or i_active < 0 then exit while
-    sleep 15 '+ rnd * 200
+    sleep 1'5 + rnd * 200
 
 wend
 
